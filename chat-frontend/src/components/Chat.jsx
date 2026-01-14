@@ -12,7 +12,7 @@ const Chat = ({ username, onLogout }) => {
   const socket = useRef(null);
 
   useEffect(() => {
-    socket.current = io('http://localhost:3000');
+    socket.current = io('https://stun-xzeu.onrender.com');
 
     socket.current.on('connect', () => {
       console.log('Socket.IO connected');
@@ -24,40 +24,62 @@ const Chat = ({ username, onLogout }) => {
     });
 
     socket.current.on('group_message', (payload) => {
-      console.log('Received group message:', payload);
+      console.log('🔔 Received group message:', payload);
       const chatKey = `group_${payload.groupId}`;
       setMessages((prev) => {
+        console.log('📦 Current messages state:', prev);
+        const existing = prev[chatKey] || [];
+        const isDuplicate = existing.some(m => m.id === payload.id);
+        
+        if (isDuplicate) {
+          console.log('⚠️ Skipping duplicate message');
+          return prev;
+        }
+        
+        const newMessage = {
+          id: payload.id,
+          text: payload.message,
+          sender: payload.sender,
+          timestamp: payload.timestamp,
+          isOwn: payload.isOwn
+        };
+        
         const updated = {
           ...prev,
-          [chatKey]: [...(prev[chatKey] || []), {
-            id: payload.id,
-            text: payload.message,
-            sender: payload.sender,
-            timestamp: payload.timestamp,
-            isOwn: payload.isOwn
-          }]
+          [chatKey]: [...existing, newMessage]
         };
-        console.log('Updated messages:', updated);
+        console.log('✅ Updated messages state:', updated);
         return updated;
       });
     });
 
     socket.current.on('private_message', (payload) => {
-      console.log('Received private message:', payload);
+      console.log('🔔 Received private message:', payload);
       const otherUser = payload.isOwn ? payload.recipientId : payload.sender;
       const chatKey = `user_${otherUser}`;
       setMessages((prev) => {
+        console.log('📦 Current messages state:', prev);
+        const existing = prev[chatKey] || [];
+        const isDuplicate = existing.some(m => m.id === payload.id);
+        
+        if (isDuplicate) {
+          console.log('⚠️ Skipping duplicate message');
+          return prev;
+        }
+        
+        const newMessage = {
+          id: payload.id,
+          text: payload.message,
+          sender: payload.sender,
+          timestamp: payload.timestamp,
+          isOwn: payload.isOwn
+        };
+        
         const updated = {
           ...prev,
-          [chatKey]: [...(prev[chatKey] || []), {
-            id: payload.id,
-            text: payload.message,
-            sender: payload.sender,
-            timestamp: payload.timestamp,
-            isOwn: payload.isOwn
-          }]
+          [chatKey]: [...existing, newMessage]
         };
-        console.log('Updated messages:', updated);
+        console.log('✅ Updated messages state:', updated);
         return updated;
       });
     });
@@ -129,8 +151,24 @@ const Chat = ({ username, onLogout }) => {
       console.log('Successfully joined group:', data);
     });
 
+    socket.current.on('notification', (payload) => {
+      console.log('Received notification:', payload);
+      const chatKey = `group_${payload.groupId}`;
+      setMessages((prev) => ({
+        ...prev,
+        [chatKey]: [...(prev[chatKey] || []), {
+          id: Date.now(),
+          text: payload.message,
+          sender: 'System',
+          timestamp: new Date(),
+          isSystem: true
+        }]
+      }));
+    });
+
     socket.current.on('error', (error) => {
-      console.error('Socket error:', error);
+      console.error('❌ Socket error:', error);
+      alert(`Error: ${error.message || JSON.stringify(error)}`);
     });
 
     socket.current.on('disconnect', () => {
@@ -160,6 +198,7 @@ const Chat = ({ username, onLogout }) => {
     const chatKey = `${selectedChat.type}_${selectedChat.id}`;
     return messages[chatKey] || [];
   };
+
   const handleReload = () => {
     setMessages({});
     setUsers([]);
@@ -167,15 +206,21 @@ const Chat = ({ username, onLogout }) => {
     setSelectedChat(null);
     if (socket.current) {
       socket.current.disconnect();
-      socket.current = io('http://localhost:3000');
+      socket.current = io('https://stun-xzeu.onrender.com');
       socket.current.emit('authenticate', { userId: username });
+    }
+  };
+
+  const handleLeaveGroup = () => {
+    if (socket.current && selectedChat && selectedChat.type === 'group') {
+      socket.current.emit('leave_group', { groupId: selectedChat.id });
+      setSelectedChat(null);
     }
   };
 
   const handleSendMessage = (message) => {
     console.log('Sending message:', message, 'to chat:', selectedChat);
     if (socket.current && selectedChat) {
-      // Add message immediately to UI
       const tempMessage = {
         id: Date.now(),
         text: message,
@@ -205,36 +250,62 @@ const Chat = ({ username, onLogout }) => {
   };
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-gray-100">
       <Sidebar users={users} groups={groups} onSelectChat={handleSelectChat} socket={socket.current} username={username} />
       <div className="flex-1 flex flex-col">
-        <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs text-gray-500">Logged in as</p>
-            <p className="text-lg font-semibold text-gray-800">{username}</p>
+        <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold shadow-md">
+                {username.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Logged in as</p>
+                <p className="text-sm font-semibold text-gray-800">{username}</p>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          
+          <div className="flex items-center gap-3">
+            {selectedChat && selectedChat.type === 'group' && (
+              <button
+                onClick={handleLeaveGroup}
+                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition text-sm font-medium shadow-sm flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Leave Group
+              </button>
+            )}
             <button
               onClick={handleReload}
-              className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition text-sm"
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-sm font-medium shadow-sm flex items-center gap-2"
             >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
               Reload
             </button>
             <button
               onClick={onLogout}
-              className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition text-sm"
+              className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm font-medium shadow-sm flex items-center gap-2"
             >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
               Logout
             </button>
           </div>
+          
           {selectedChat && (
-            <div className="text-right">
+            <div className="absolute left-1/2 transform -translate-x-1/2 text-center">
               <p className="text-xs text-gray-500">Chatting with</p>
               <p className="text-lg font-semibold text-gray-800">{selectedChat.name}</p>
             </div>
           )}
         </div>
-        <MessageWindow messages={getCurrentMessages()} selectedChat={selectedChat} />
+        <MessageWindow messages={getCurrentMessages()} selectedChat={selectedChat} username={username} />
         <MessageInput onSendMessage={handleSendMessage} />
       </div>
     </div>
